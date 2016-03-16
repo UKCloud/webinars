@@ -17,6 +17,7 @@ provider "vcd" {
     org             = "${var.vcd_org}"
     password        = "${var.vcd_pass}"
     url             = "https://api.vcd.portal.skyscapecloud.com/api"
+    maxRetryTimeout = "300"
 }
 
 # Create our networks

@@ -6,6 +6,9 @@ In this repository we have content from the following webinars:
 #### Skyscape Portal & API Overview
 This session was last run on Friday 19th February 2016 by Rob Coward (rcoward@skyscapecloud.com).
 
+#### Automate Your Buildout
+This session was run on Friday 29th April 2016 by Rob Coward (rcoward@skyscapecloud.com).
+
 License and Authors
 -------------------
 Authors:

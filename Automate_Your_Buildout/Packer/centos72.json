@@ -1,0 +1,82 @@
+{
+  "_comment": "Build with `packer build centos72.json`",
+  "variables": {
+    "cpus":      "1",
+    "memory":    "512",
+    "disk_size": "10240",
+    "headless":  "false",
+    "install_vagrant_key": "false",
+    "iso_url": "http://mirrors.sonic.net/centos/7.2.1511/isos/x86_64/CentOS-7-x86_64-Minimal-1511.iso",
+    "iso_checksum":      "783eef50e1fb91c78901d0421d8114a29b998478",
+    "iso_checksum_type": "sha1",
+    "kickstart": "ks7.cfg",
+    "shutdown_command": "sudo -S shutdown -P now",
+    "ssh_username": "packer",
+    "ssh_private_key_file": "packer.pem",
+    "update": "true",
+    "vm_name": "centos72",
+    "vmware_guest_os_type": "centos-64",
+    "atlas_token": "{{env `ATLAS_TOKEN`}}"
+  },
+  "builders": [
+    {
+      "type": "vmware-iso",
+      "iso_url":           "{{ user `iso_url` }}",
+      "iso_checksum":      "{{ user `iso_checksum` }}",
+      "iso_checksum_type": "{{ user `iso_checksum_type` }}",
+      "boot_command": [
+        "<tab> text ks=http://{{ .HTTPIP }}:{{ .HTTPPort}}/{{ user `kickstart` }}<enter>"
+      ],
+      "headless":             "{{ user `headless` }}",
+      "http_directory":       "http",
+      "output_directory":     "output-{{ user `vm_name` }}-vmware-iso",
+      "shutdown_command":     "{{ user `shutdown_command` }}",
+      "ssh_username":         "{{ user `ssh_username` }}",
+      "ssh_private_key_file": "{{ user `ssh_private_key_file` }}",
+      "ssh_wait_timeout":     "10000s",
+      "vm_name":              "{{ user `vm_name` }}",
+      "guest_os_type":        "{{ user `vmware_guest_os_type` }}",
+      "version":              "9",
+      "disk_size":            "{{ user `disk_size` }}",
+      "vmx_data": {
+        "memsize":              "{{ user `memory` }}",
+        "numvcpus":             "{{ user `cpus` }}",
+        "cpuid.coresPerSocket": "1",
+        "ethernet0.virtualDev": "vmxnet3",
+        "scsi0.virtualdev":     "pvscsi"
+      },
+      "vmx_data_post": {
+        "ethernet0.connectiontype": "none"
+      }  
+    }
+  ],
+  "provisioners": [
+    {
+      "environment_vars": [
+        "UPDATE={{user `update`}}",
+        "INSTALL_VAGRANT_KEY={{user `install_vagrant_key`}}",
+        "SSH_USERNAME={{user `ssh_username`}}",
+        "SSH_PASSWORD={{user `ssh_password`}}"
+      ],
+      "execute_command": "{{.Vars}} sudo -E -S bash '{{.Path}}'",
+      "scripts": [
+        "script/sshd.sh",
+        "script/update.sh",
+        "script/vagrant.sh",
+        "script/vmware.sh",
+        "script/motd.sh",
+        "script/cloudinit.sh",
+        "script/cleanup.sh"
+      ],
+      "type": "shell"
+    }
+  ],
+  "post-processors": [
+    {
+      "type": "vagrant-vmware-ovf",
+      "keep_input_artifact": true,
+      "output": "{{ user `vm_name` }}_vmware_ovf.box"
+    }
+  ]
+}
+

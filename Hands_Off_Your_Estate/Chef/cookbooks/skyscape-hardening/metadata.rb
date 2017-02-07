@@ -7,3 +7,4 @@ long_description 'Installs/Configures skyscape-hardening'
 version '0.1.0'
 
 depends 'openssh'
+depends 'audit'

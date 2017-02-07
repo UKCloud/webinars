@@ -10,3 +10,4 @@ variable "web_net_cidr"   { default = "192.168.151.0/24" }
 variable "jumpbox_int_ip" { default = "192.168.150.10" }
 variable "haproxy_int_ip" { default = "192.168.151.10" }
 variable "webserver_count" { default = 2 }
+variable "domain_name"    { default = "demo.devops-consultant.com" }

@@ -36,7 +36,7 @@ resource "vcd_network" "web_net" {
 
 # Jumpbox VM on the Management Network
 resource "vcd_vapp" "jumpbox" {
-    name          = "jump01"
+    name          = "jump01.${var.domain_name}"
     catalog_name  = "${var.catalog}"
     template_name = "${var.vapp_template}"
     memory        = 512
@@ -47,7 +47,7 @@ resource "vcd_vapp" "jumpbox" {
 
 # Webserver VMs on the Webserver network
 resource "vcd_vapp" "webservers" {
-    name          = "${format("web%02d", count.index + 1)}"
+    name          = "${format("web%02d", count.index + 1)}.${var.domain_name}"
     catalog_name  = "${var.catalog}"
     template_name = "${var.vapp_template}"
     memory        = 1024
@@ -61,7 +61,7 @@ resource "vcd_vapp" "webservers" {
 
 # Load-balancer VM on the Webserver network
 resource "vcd_vapp" "haproxy" {
-    name          = "lb01"
+    name          = "lb01.${var.domain_name}"
     catalog_name  = "${var.catalog}"
     template_name = "${var.vapp_template}"
     memory        = 1024

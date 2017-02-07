@@ -37,3 +37,8 @@ build/
 
 **/terraform.tfstate
 **/terraform.tfstate.backup
+
+# Packer outputs that dont need to be in git
+**/output*-vmware-iso
+**/*.iso
+**/*.box

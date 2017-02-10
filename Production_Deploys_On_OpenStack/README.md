@@ -23,13 +23,13 @@ The templates build and configure a complete 3-Tier application stack consisting
 
 ----------
 
-The templates setup everything from scratch apart from your SSH Keypair. You will need to setup your SSH Keypair in advance and update the 'environment_example.yaml' accordingly.
+The templates setup everything from scratch apart from your SSH Keypair. You will need to setup your SSH Keypair in advance and update the `environment_example.yaml` accordingly.
 
 To deploy the entire stack with a single command, run:
-'''
+```
 openstack stack create -t deploystack.yaml -e environment_example.yaml --wait appstack
-'''
+```
 
-The output from the 'loadbalancer' stack shows you the floating IP addresses that have been assigned to the Jumpbox instance for SSH access, and to the HAProxy VIP, along with the URL for web requests.
+The output from the `loadbalancer` stack shows you the floating IP addresses that have been assigned to the Jumpbox instance for SSH access, and to the HAProxy VIP, along with the URL for web requests.
 
 In order to support the HAProxy VIP and management via keepalived, the template sets up the required OpenStack configurations of ports and floating IP address, along with the 'allowed address pairs' configuration on the two instances.

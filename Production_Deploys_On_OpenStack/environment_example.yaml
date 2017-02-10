@@ -1,0 +1,14 @@
+parameters:
+  key_name: RobC
+  image: CentOS 7
+  router: InternetGW
+  external_network: internet
+  dmz_subnet_cidr: 10.0.0.0/24
+  lb_subnet_cidr: 10.1.0.0/24
+  web_subnet_cidr: 10.2.0.0/24
+  db_subnet_cidr: 10.3.0.0/24
+  dns_servers: 8.8.8.8
+  jumpbox_flavor: t1.small
+  lb_flavor: t1.small
+  web_flavor: t1.small
+  db_flavor: t1.small

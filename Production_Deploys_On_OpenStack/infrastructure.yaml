@@ -1,0 +1,238 @@
+heat_template_version: 2015-10-15
+
+description: >
+   This HEAT template creates a minimal infrastructure deployment of a single 
+   router, network and subnet. It defines a Security Group to allow inbound
+   SSH traffic and creates a Jumpbox server configured with the security group
+   and a floating IP address for external access.
+
+parameters:
+  external_network:
+    type: string
+    description: Name of the external network used for floating ip addresses
+    default: internet
+  router_name:
+    type: string
+    description: Name of the default router
+    default: InternetGW
+  dmz_subnet_cidr:
+    type: string
+    description: DMZ Subnet CIDR address
+    default: 10.0.0.0/24
+  app_subnet_cidr:
+    type: string
+    description: DMZ Subnet CIDR address
+    default: 10.1.0.0/24
+  data_subnet_cidr:
+    type: string
+    description: DMZ Subnet CIDR address
+    default: 10.2.0.0/24
+  dns_servers:
+    type: string
+    description: DNS Servers to configure on the DMZ subnet
+    default: 8.8.8.8
+
+resources:
+  dmz_net:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: dmz_net
+
+  dmz_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: dmz_subnet
+      network: { get_resource: dmz_net }
+      allocation_pools:
+        - start: 
+            list_join: ['.', [ str_split: ['.', { get_param: dmz_subnet_cidr }, 0], str_split: ['.', { get_param: dmz_subnet_cidr }, 1], str_split: ['.', { get_param: dmz_subnet_cidr }, 2], '20' ]] 
+          end: 
+            list_join: ['.', [ str_split: ['.', { get_param: dmz_subnet_cidr }, 0], str_split: ['.', { get_param: dmz_subnet_cidr }, 1], str_split: ['.', { get_param: dmz_subnet_cidr }, 2], '200' ]]
+      cidr: { get_param: dmz_subnet_cidr }
+      dns_nameservers: [ { get_param: dns_servers } ]
+      gateway_ip: 
+        list_join: ['.', [ str_split: ['.', { get_param: dmz_subnet_cidr }, 0], str_split: ['.', { get_param: dmz_subnet_cidr }, 1], str_split: ['.', { get_param: dmz_subnet_cidr }, 2], '1' ]]
+      ip_version: 4
+
+  app_net:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: app_net
+
+  app_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: app_subnet
+      network: { get_resource: app_net }
+      allocation_pools:
+        - start: 
+            list_join: ['.', [ str_split: ['.', { get_param: app_subnet_cidr }, 0], str_split: ['.', { get_param: app_subnet_cidr }, 1], str_split: ['.', { get_param: app_subnet_cidr }, 2], '20' ]] 
+          end: 
+            list_join: ['.', [ str_split: ['.', { get_param: app_subnet_cidr }, 0], str_split: ['.', { get_param: app_subnet_cidr }, 1], str_split: ['.', { get_param: app_subnet_cidr }, 2], '200' ]]
+      cidr: { get_param: app_subnet_cidr }
+      dns_nameservers: [ { get_param: dns_servers } ]
+      gateway_ip: 
+        list_join: ['.', [ str_split: ['.', { get_param: app_subnet_cidr }, 0], str_split: ['.', { get_param: app_subnet_cidr }, 1], str_split: ['.', { get_param: app_subnet_cidr }, 2], '1' ]]
+      ip_version: 4
+
+  data_net:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: data_net
+
+  data_subnet:
+    type: OS::Neutron::Subnet
+    properties:
+      name: data_subnet
+      network: { get_resource: data_net }
+      allocation_pools:
+        - start: 
+            list_join: ['.', [ str_split: ['.', { get_param: data_subnet_cidr }, 0], str_split: ['.', { get_param: data_subnet_cidr }, 1], str_split: ['.', { get_param: data_subnet_cidr }, 2], '20' ]] 
+          end: 
+            list_join: ['.', [ str_split: ['.', { get_param: data_subnet_cidr }, 0], str_split: ['.', { get_param: data_subnet_cidr }, 1], str_split: ['.', { get_param: data_subnet_cidr }, 2], '200' ]]
+      cidr: { get_param: data_subnet_cidr }
+      dns_nameservers: [ { get_param: dns_servers } ]
+      gateway_ip: 
+        list_join: ['.', [ str_split: ['.', { get_param: data_subnet_cidr }, 0], str_split: ['.', { get_param: data_subnet_cidr }, 1], str_split: ['.', { get_param: data_subnet_cidr }, 2], '1' ]]
+      ip_version: 4
+
+
+  router:
+    type: OS::Neutron::Router
+    properties:
+      external_gateway_info: { network: { get_param: external_network } }
+      name: { get_param: router_name }
+
+  dmz_gw:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: { get_resource: router }
+      subnet: { get_resource: dmz_subnet }
+
+  app_gw:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: { get_resource: router }
+      subnet: { get_resource: app_subnet }
+
+  data_gw:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router: { get_resource: router }
+      subnet: { get_resource: data_subnet }
+
+  ssh_ext_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: ssh_ext_secgroup
+      rules:
+        - protocol: tcp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: icmp
+          remote_ip_prefix: 0.0.0.0/0
+
+  ssh_int_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: ssh_int_secgroup
+      rules:
+        - protocol: tcp
+          remote_mode: remote_group_id
+          remote_group_id: { get_resource: ssh_ext_secgroup }
+          port_range_min: 22
+          port_range_max: 22
+        - protocol: icmp
+          remote_mode: remote_group_id
+          remote_group_id: { get_resource: ssh_ext_secgroup }
+
+  web_ext_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+     name: web_ext_secgroup
+     rules:
+        - protocol: tcp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 80
+          port_range_max: 80
+        - protocol: tcp
+          remote_ip_prefix: 0.0.0.0/0
+          port_range_min: 9000
+          port_range_max: 9000
+
+  app_int_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: app_int_secgroup
+      rules:
+        - protocol: tcp
+          remote_mode: remote_group_id
+          remote_group_id: { get_resource: web_ext_secgroup }
+          port_range_min: 80
+          port_range_max: 80
+
+  data_int_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: data_int_secgroup
+      rules:
+        - protocol: tcp
+          remote_mode: remote_group_id
+          remote_group_id: { get_resource: app_int_secgroup }
+          port_range_min: 3306
+          port_range_max: 3306
+
+  consul_int_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      name: consul_int_secgroup
+      rules:
+        - direction: ingress
+          protocol: tcp
+          remote_group_id:
+          remote_mode: remote_group_id
+          port_range_min: 8300
+          port_range_max: 8302
+        - direction: ingress
+          protocol: udp
+          remote_group_id:
+          remote_mode: remote_group_id
+          port_range_min: 8301
+          port_range_max: 8302
+        - direction: ingress
+          protocol: tcp
+          remote_group_id:
+          remote_mode: remote_group_id
+          port_range_min: 8400
+          port_range_max: 8400
+        - direction: ingress
+          protocol: tcp
+          remote_group_id:
+          remote_mode: remote_group_id
+          port_range_min: 8500
+          port_range_max: 8500
+        - direction: ingress
+          protocol: tcp
+          remote_group_id:
+          remote_mode: remote_group_id
+          port_range_min: 8600
+          port_range_max: 8600
+        - direction: ingress
+          protocol: udp
+          remote_group_id:
+          remote_mode: remote_group_id
+          port_range_min: 8600
+          port_range_max: 8600
+
+outputs:
+  router_name:
+    value: { get_attr: [router, name] }
+  dmz_net:
+    value: { get_resource: dmz_net }
+  dmz_subnet:
+    value: { get_attr: [dmz_subnet, name] }
+

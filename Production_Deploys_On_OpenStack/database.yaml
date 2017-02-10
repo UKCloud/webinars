@@ -1,0 +1,122 @@
+heat_template_version: 2015-10-15
+
+description: >
+   This HEAT template creates a minimal database deployment.
+
+parameters:
+  key_name:
+    type: string
+    description: SSH Key Pair
+    constraints:
+      - custom_constraint: nova.keypair
+  flavor:
+    type: string
+    description: Flavor to use for the haproxy server
+    default: t1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  image:
+    type: string
+    description: Image ID or image name to use for the haproxy server
+    default: "CentOS 7"
+    constraints:
+      - custom_constraint: glance.image
+  data_network:
+    type: string
+    description: Data network to create DB instances on
+    default: data_net
+  data_security_group:
+    type: string
+    description: Security Group to apply to DB instances
+    default: data_int_secgroup
+  ssh_security_group:
+    type: string
+    description: Security Group to allow SSH access to instances
+    default: ssh_int_secgroup
+  db_name:
+    type: string
+    description: Database name
+    default: counter
+  db_user:
+    type: string
+    description: Database userid
+    default: counter
+  db_password:
+    type: string
+    description: Database password
+    hidden: true
+    default: counterpassword
+
+resources:
+  db_cluster:
+    type: OS::Nova::ServerGroup
+    properties:
+      name: Database Cluster
+      policies: ['anti-affinity']
+
+  master_server:
+    type: OS::Nova::Server
+    properties:
+      name: db01
+      flavor: { get_param: flavor }
+      image: { get_param: image }
+      key_name: { get_param: key_name }
+      scheduler_hints: { group: { get_resource: db_cluster }}
+      networks:
+        - network: { get_param: data_network }
+      security_groups:
+        - { get_param: data_security_group }
+        - { get_param: ssh_security_group }
+      user_data_format: SOFTWARE_CONFIG
+      user_data: { get_attr: [config_agent, config] }
+
+  slave_server:
+    type: OS::Nova::Server
+    properties:
+      name: db02
+      flavor: { get_param: flavor }
+      image: { get_param: image }
+      key_name: { get_param: key_name }
+      scheduler_hints: { group: { get_resource: db_cluster }}
+      networks:
+        - network: { get_param: data_network }
+      security_groups:
+        - { get_param: data_security_group }
+        - { get_param: ssh_security_group }
+      user_data_format: SOFTWARE_CONFIG
+      user_data: { get_attr: [config_agent, config] }
+
+  # Install, configure and enable the Heat configuration agent
+  config_agent:
+    type: collect-config-setup/install_config_agent_centos_yum.yaml
+
+  install_database:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      inputs:
+      - name: APP_DB
+      - name: APP_USER
+      - name: APP_PASSWORD
+      config:
+        str_replace:
+          template: { get_file: 'files/install_mariadb.sh' }
+          params:
+            DATABASE_SCHEMA: { get_file: 'files/db_schema.sql' }
+
+  deploy_database:
+    type: OS::Heat::SoftwareDeploymentGroup
+    properties:
+      config:
+        get_resource: install_database
+      servers:
+        master: { get_resource: master_server }
+        slave: { get_resource: slave_server }
+      input_values:
+        APP_DB: { get_param: db_name }
+        APP_USER: { get_param: db_user }
+        APP_PASSWORD: { get_param: db_password }
+
+outputs:
+  master_ip:
+    value: { get_attr: [master_server, first_address]}

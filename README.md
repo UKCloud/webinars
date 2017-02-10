@@ -1,20 +1,23 @@
-# Skyscape Partner Webinars
+# UKCloud Partner Webinars
 This is a collection of scripts, code snippets and demos used during our partner webinar sessions. Feel free to download them and try them out for yourself.
 
 In this repository we have content from the following webinars:
 
 #### Skyscape Portal & API Overview
-This session was last run on Friday 19th February 2016 by Rob Coward (rcoward@skyscapecloud.com).
+This session was last run on Friday 19th February 2016 by Rob Coward (rcoward@ukcloud.com).
 
 #### Automate Your Buildout
-This session was run on Friday 29th April 2016 by Rob Coward (rcoward@skyscapecloud.com).
+This session was run on Friday 29th April 2016 by Rob Coward (rcoward@ukcloud.com).
+
+#### Deploying Production Workloads on Cloud Native Infrastructure
+This session was run on Friday 10th February 2017 by Rob Coward (rcoward@ukcloud.com).
 
 License and Authors
 -------------------
 Authors:
-  * Rob Coward (rcoward@skyscapecloud.com)
+  * Rob Coward (rcoward@ukcloud.com)
 
-Copyright 2016 Skyscape Cloud Services
+Copyright 2016 UKCloud
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
 

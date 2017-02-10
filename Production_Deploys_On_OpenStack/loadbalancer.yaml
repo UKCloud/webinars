@@ -1,0 +1,378 @@
+heat_template_version: 2015-10-15
+
+description: >
+   This HEAT template creates a pair of servers running keepalived in a
+   master / slave configuration controlling a virtual-ip address. It
+   defines a neutron port for the VIP so that a floating IP address can 
+   be associated, and then HAProxy is run on both servers to create an
+   HA Load-Balancer service.
+   Also deploys Consul and Consul-template for service discovery
+   and dynamic load-balancer configuration.
+
+parameters:
+  key_name:
+    type: string
+    description: SSH Key Pair
+    constraints:
+      - custom_constraint: nova.keypair
+  jumpbox_flavor:
+    type: string
+    description: Flavor to use for the jumpbox server
+    default: t1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  haproxy_flavor:
+    type: string
+    description: Flavor to use for the haproxy server
+    default: t1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  image:
+    type: string
+    description: Image ID or image name to use for the haproxy server
+    default: "CentOS 7"
+    constraints:
+      - custom_constraint: glance.image
+  external_network:
+    type: string
+    description: Name of the external network used for floating ip addresses
+    default: internet
+  dmz_subnet_cidr:
+    type: string
+    description: DMZ Subnet CIDR address
+    default: 10.0.0.0/24
+  dmz_net:
+    type: string
+    description: Name of the network to create the loadbalancer instances on
+    default: dmz_net
+  dmz_subnet:
+    type: string
+    description: Name of the subnet to create the loadbalancer instances on
+    default: dmz_subnet
+  keepalived_password:
+    type: string
+    description: Password for keepalived encryption
+    default: SUperS3creT
+  web_ext_secgroup:
+    type: string
+    description: Security Group to apply to DB instances
+    default: web_ext_secgroup
+  ssh_ext_secgroup:
+    type: string
+    description: Security Group to allow SSH access to instances
+    default: ssh_ext_secgroup
+  ssh_int_secgroup:
+    type: string
+    description: Security Group to allow SSH access to instances
+    default: ssh_int_secgroup
+  consul_int_secgroup:
+    type: string
+    description: Security Group to allow Consul to communicate
+    default: consul_int_secgroup  
+  keepalived_password:
+    type: string
+    hidden: true
+    description: Password for keepalived encryption
+    default: SUperS3creT
+
+resources:
+
+  jumpbox_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: dmz_net }
+      fixed_ips:
+        - subnet_id: { get_param: dmz_subnet }
+      security_groups:
+        - { get_param: ssh_ext_secgroup }
+        - { get_param: consul_int_secgroup }
+
+  jumpbox_server:
+    type: OS::Nova::Server
+    properties:
+      name: jump01
+      flavor: { get_param: jumpbox_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key_name }
+      networks:
+        - port: { get_resource: jumpbox_port }
+      user_data_format: SOFTWARE_CONFIG
+      user_data: { get_attr: [config_agent, config] }
+
+  jumpbox_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_param: external_network }
+
+  jumpbox_ip_assoc:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: { get_resource: jumpbox_ip }
+      port_id: { get_resource: jumpbox_port }
+
+  haproxy_secgroup:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      rules:
+        - direction: ingress
+          protocol: 112
+          remote_group_id:
+          remote_mode: remote_group_id
+
+  haproxy_vip_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: dmz_net }
+      fixed_ips:
+        - ip_address:
+            list_join: ['.', [ str_split: ['.', { get_param: dmz_subnet_cidr }, 0], str_split: ['.', { get_param: dmz_subnet_cidr }, 1], str_split: ['.', { get_param: dmz_subnet_cidr }, 2], '201' ]]
+      security_groups:
+        - { get_param: web_ext_secgroup }
+        - { get_param: consul_int_secgroup }
+
+  haproxy_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: { get_param: external_network }
+      port_id: { get_resource: haproxy_vip_port }
+
+  haproxy_1_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: dmz_net }
+      allowed_address_pairs:
+        - ip_address:
+            list_join: ['.', [ str_split: ['.', { get_param: dmz_subnet_cidr }, 0], str_split: ['.', { get_param: dmz_subnet_cidr }, 1], str_split: ['.', { get_param: dmz_subnet_cidr }, 2], '201' ]]
+      fixed_ips:
+        - subnet_id: { get_param: dmz_subnet }
+      security_groups:
+        - { get_param: web_ext_secgroup }
+        - { get_resource: haproxy_secgroup }
+        - { get_param: ssh_int_secgroup }
+        - { get_param: consul_int_secgroup }
+
+  haproxy_2_port:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_param: dmz_net }
+      allowed_address_pairs:
+        - ip_address:
+            list_join: ['.', [ str_split: ['.', { get_param: dmz_subnet_cidr }, 0], str_split: ['.', { get_param: dmz_subnet_cidr }, 1], str_split: ['.', { get_param: dmz_subnet_cidr }, 2], '201' ]]
+      fixed_ips:
+        - subnet_id: { get_param: dmz_subnet }
+      security_groups:
+        - { get_param: web_ext_secgroup }
+        - { get_resource: haproxy_secgroup }
+        - { get_param: ssh_int_secgroup }
+        - { get_param: consul_int_secgroup }
+
+  haproxy_cluster:
+    type: OS::Nova::ServerGroup
+    properties:
+      name: Haproxy Cluster
+      policies: ['anti-affinity']
+
+  haproxy_1_server:
+    type: OS::Nova::Server
+    properties:
+      name: haproxy01
+      flavor: { get_param: haproxy_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key_name }
+      scheduler_hints: { group: { get_resource: haproxy_cluster }}
+      networks:
+        - port: { get_resource: haproxy_1_port }
+      user_data_format: SOFTWARE_CONFIG
+      user_data: { get_attr: [config_agent, config] }
+
+  haproxy_2_server:
+    type: OS::Nova::Server
+    properties:
+      name: haproxy02
+      flavor: { get_param: haproxy_flavor }
+      image: { get_param: image }
+      key_name: { get_param: key_name }
+      scheduler_hints: { group: { get_resource: haproxy_cluster }}
+      networks:
+        - port: { get_resource: haproxy_2_port }
+      user_data_format: SOFTWARE_CONFIG
+      user_data: { get_attr: [config_agent, config] }
+
+  # Install, configure and enable the Heat configuration agent
+  config_agent:
+    type: collect-config-setup/install_config_agent_centos_yum.yaml
+
+  keepalived_config:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      inputs:
+      - name: state
+      - name: priority
+      - name: password
+      - name: vip
+      outputs:
+      - name: result
+      config: 
+        str_replace:
+          template:  { get_file: 'files/install_keepalived.sh' }
+          params:
+            KEEPALIVED_CONF: { get_file: 'files/keepalived.conf' }
+
+  keepalived_master_config:
+    type: OS::Heat::SoftwareDeployment
+    properties:
+      signal_transport: CFN_SIGNAL
+      config:
+        get_resource: keepalived_config
+      server:
+        get_resource: haproxy_1_server
+      input_values:
+        state: MASTER
+        priority: 100
+        password: { get_param: keepalived_password }
+        vip: { get_attr: [haproxy_vip_port, fixed_ips, 0, ip_address] }
+
+  keepalived_slave_config:
+    type: OS::Heat::SoftwareDeployment
+    properties:
+      signal_transport: CFN_SIGNAL
+      config:
+        get_resource: keepalived_config
+      server:
+        get_resource: haproxy_2_server
+      input_values:
+        state: BACKUP
+        priority: 50
+        password: { get_param: keepalived_password }
+        vip: { get_attr: [haproxy_vip_port, fixed_ips, 0, ip_address] }
+
+  install_haproxy:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      inputs:
+      - name: vip
+      config: { get_file: 'files/install_haproxy.sh' }
+        # str_replace:
+        #   template:  { get_file: 'files/install_haproxy.sh' }
+        #   params:
+        #     HAPROXY_CFG: { get_file: 'files/haproxy.cfg' }
+
+  deploy_haproxy:
+    type: OS::Heat::SoftwareDeploymentGroup
+    depends_on: [ keepalived_master_config, keepalived_slave_config ]
+    properties:
+      config:
+        get_resource: install_haproxy
+      servers:
+        haproxy01: { get_resource: haproxy_1_server }
+        haproxy02: { get_resource: haproxy_2_server }
+      input_values:
+        vip: { get_attr: [haproxy_vip_port, fixed_ips, 0, ip_address] }
+
+  install_consul:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      inputs:
+      - name: agenttype
+      - name: jumpbox_ip
+      - name: vip
+      - name: local_ip
+      config: 
+        str_replace:
+          template:  { get_file: 'files/install_consul.sh' }
+          params:
+            CONSUL_INIT_SH: { get_file: 'files/consul.init.sh' }
+
+  bootstrap_consul:
+    type: OS::Heat::SoftwareDeploymentGroup
+    properties:
+      config:
+        get_resource: install_consul
+      servers:
+        jumpbox: { get_resource: jumpbox_server }
+      input_values:
+        agenttype: bootstrap
+
+  start_consul_A:
+    type: OS::Heat::SoftwareDeploymentGroup
+    depends_on: [ bootstrap_consul ]
+    properties:
+      config:
+        get_resource: install_consul
+      servers:
+        haproxy01: { get_resource: haproxy_1_server }
+      input_values:
+        agenttype: server
+        jumpbox_ip: { get_attr: [jumpbox_port, fixed_ips, 0, ip_address] }
+        vip: { get_attr: [haproxy_2_port, fixed_ips, 0, ip_address] }
+        local_ip: { get_attr: [haproxy_1_port, fixed_ips, 0, ip_address] }
+
+  start_consul_B:
+    type: OS::Heat::SoftwareDeploymentGroup
+    depends_on: [ bootstrap_consul ]
+    properties:
+      config:
+        get_resource: install_consul
+      servers:
+        haproxy01: { get_resource: haproxy_2_server }
+      input_values:
+        agenttype: server
+        jumpbox_ip: { get_attr: [jumpbox_port, fixed_ips, 0, ip_address] }
+        vip: { get_attr: [haproxy_1_port, fixed_ips, 0, ip_address] }
+        local_ip: { get_attr: [haproxy_2_port, fixed_ips, 0, ip_address] }
+
+  start_consul_C:
+    type: OS::Heat::SoftwareDeploymentGroup
+    depends_on: [ start_consul_A, start_consul_B ]
+    properties:
+      config:
+        get_resource: install_consul
+      servers:
+        jumpbox: { get_resource: jumpbox_server }
+      input_values:
+        agenttype: server
+        jumpbox_ip: { get_attr: [haproxy_1_port, fixed_ips, 0, ip_address] }
+        vip: { get_attr: [haproxy_2_port, fixed_ips, 0, ip_address] }
+        local_ip: { get_attr: [jumpbox_port, fixed_ips, 0, ip_address] }
+
+  install_consul_template:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      inputs:
+      - name: vip
+      config: 
+        str_replace:
+          template:  { get_file: 'files/install_consul-template.sh' }
+          params:
+            CONSULTEMPLATE_SERVICE: { get_file: 'files/consul-template.service' }
+            CONSULTEMPLATE_CONFIG: { get_file: 'files/consul-template.config' }
+            HAPROXY_CFG_CTMPL: { get_file: 'files/haproxy.cfg.ctmpl' }
+
+  configure_haproxy:
+    type: OS::Heat::SoftwareDeploymentGroup
+    depends_on: [ start_consul_C ]
+    properties:
+      config:
+        get_resource: install_consul_template
+      servers:
+        haproxy01: { get_resource: haproxy_1_server }
+        haproxy02: { get_resource: haproxy_2_server }
+      input_values:
+        vip: { get_attr: [haproxy_vip_port, fixed_ips, 0, ip_address] }
+
+
+outputs:
+  jumpbox_ip:
+    value: { get_attr: [jumpbox_ip, floating_ip_address] }
+  loadbalancer_ip:
+    value: { get_attr: [haproxy_ip, floating_ip_address] }
+  web_url:
+    value:
+      str_replace:
+        template: http://host/
+        params:
+          host: { get_attr: [haproxy_ip, floating_ip_address] }

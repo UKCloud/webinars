@@ -1,0 +1,123 @@
+heat_template_version: 2015-10-15
+
+description: >
+   This HEAT template creates a pair of servers running keepalived in a
+   master / slave configuration controlling a virtual-ip address. It
+   defines a neutron port for the VIP so that a floating IP address can 
+   be associated, and then HAProxy is run on both servers to create an
+   HA Load-Balancer service.
+   Optionally deploys Consul and Consul-template for service discovery
+   and dynamic load-balancer configuration.
+
+parameters:
+  key_name:
+    type: string
+    description: SSH Key Pair
+    constraints:
+      - custom_constraint: nova.keypair
+  image:
+    type: string
+    description: Image ID or image name to use for the haproxy server
+    default: "CentOS 7"
+    constraints:
+      - custom_constraint: glance.image
+  router_name:
+    type: string
+    description: Name of the router used to connect to the external network
+    default: InternetGW
+  external_network:
+    type: string
+    description: Name of the external network used for floating ip addresses
+    default: internet
+  dmz_subnet_cidr:
+    type: string
+    description: DMZ Subnet CIDR address
+    default: 10.0.0.0/24
+  app_subnet_cidr:
+    type: string
+    description: DMZ Subnet CIDR address
+    default: 10.1.0.0/24
+  data_subnet_cidr:
+    type: string
+    description: DMZ Subnet CIDR address
+    default: 10.2.0.0/24
+  dns_servers:
+    type: string
+    description: DNS Servers to configure on the DMZ subnet
+    default: 8.8.8.8
+  jumpbox_flavor:
+    type: string
+    description: Flavor to use for the haproxy server
+    default: t1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  lb_flavor:
+    type: string
+    description: Flavor to use for the haproxy server
+    default: t1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  web_flavor:
+    type: string
+    description: Flavor to use for the haproxy server
+    default: t1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  db_flavor:
+    type: string
+    description: Flavor to use for the haproxy server
+    default: t1.small
+    constraints:
+      - custom_constraint: nova.flavor
+
+resources:
+  infrastructure:
+    type: OS::Heat::Stack
+    properties:
+      template: { get_file: "infrastructure.yaml" }
+      timeout: 60
+      parameters:
+        external_network: { get_param: external_network }
+        router_name: { get_param: router_name }
+        dmz_subnet_cidr: { get_param: dmz_subnet_cidr }
+        app_subnet_cidr: { get_param: app_subnet_cidr }
+        data_subnet_cidr: { get_param: data_subnet_cidr }
+        dns_servers: { get_param: dns_servers }
+
+  loadbalancer:
+    type: OS::Heat::Stack
+    properties:
+      template: { get_file: "loadbalancer.yaml" }
+      timeout: 60
+      parameters:
+        external_network: { get_param: external_network }
+        key_name: { get_param: key_name }
+        jumpbox_flavor: { get_param: jumpbox_flavor }
+        haproxy_flavor: { get_param: lb_flavor }
+        image: { get_param: image }
+        external_network: { get_param: external_network }
+        dmz_subnet_cidr: { get_param: dmz_subnet_cidr }
+        dmz_net: { get_attr: [infrastructure, outputs, dmz_net] }
+        dmz_subnet: { get_attr: [infrastructure, outputs, dmz_subnet] }
+
+  database:
+    type: OS::Heat::Stack
+    depends_on: [ infrastructure ]
+    properties:
+      template: { get_file: "database.yaml" }
+      timeout: 60
+      parameters:
+        key_name: { get_param: key_name }
+        flavor: { get_param: db_flavor }
+        image: { get_param: image }
+
+  webfarm:
+    type: OS::Heat::Stack
+    properties:
+      template: { get_file: "application.yaml" }
+      timeout: 60
+      parameters:
+        key_name: { get_param: key_name }
+        flavor: { get_param: web_flavor }
+        image: { get_param: image }
+        db_host: { get_attr: [database, outputs, master_ip] }

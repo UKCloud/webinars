@@ -1,0 +1,175 @@
+heat_template_version: 2015-10-15
+
+description: >
+   This HEAT template creates an autoscaled web application deployment.
+
+parameters:
+  key_name:
+    type: string
+    description: SSH Key Pair
+    constraints:
+      - custom_constraint: nova.keypair
+  flavor:
+    type: string
+    description: Flavor to use for the haproxy server
+    default: t1.small
+    constraints:
+      - custom_constraint: nova.flavor
+  image:
+    type: string
+    description: Image ID or image name to use for the haproxy server
+    default: "CentOS 7"
+    constraints:
+      - custom_constraint: glance.image
+  app_network:
+    type: string
+    description: Data network to create DB instances on
+    default: app_net
+  app_security_group:
+    type: string
+    description: Security Group to apply to DB instances
+    default: app_int_secgroup
+  ssh_security_group:
+    type: string
+    description: Security Group to allow SSH access to instances
+    default: ssh_int_secgroup
+  consul_int_secgroup:
+    type: string
+    description: Security Group to allow to Consul
+    default: consul_int_secgroup
+  db_host:
+    type: string
+    description: Hostname for database server
+  db_name:
+    type: string
+    description: Database name
+    default: counter
+  db_user:
+    type: string
+    description: Database userid
+    default: counter
+  db_password:
+    type: string
+    description: Database password
+    hidden: true
+    default: counterpassword
+  app_cluster:
+    type: string
+    description: Server group defining anti-affinity policy
+  haproxy_vip: 
+    type: string
+    description: VIP for the active HAProxy instance
+    default: 10.0.0.201
+
+resources:
+  server:
+    type: OS::Nova::Server
+    properties:
+      flavor: { get_param: flavor }
+      image: { get_param: image }
+      key_name: { get_param: key_name }
+      scheduler_hints: { group: { get_param: app_cluster }}
+      networks:
+        - network: { get_param: app_network }
+      security_groups:
+        - { get_param: app_security_group }
+        - { get_param: ssh_security_group }
+        - { get_param: consul_int_secgroup }
+      user_data_format: SOFTWARE_CONFIG
+      user_data: { get_attr: [config_agent, config] }
+
+  # Install, configure and enable the Heat configuration agent
+  config_agent:
+    type: ../collect-config-setup/install_config_agent_centos_yum.yaml
+
+  install_webserver:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      inputs:
+      - name: DB_HOST
+      - name: APP_DB
+      - name: APP_USER
+      - name: APP_PASSWORD
+      - name: APP_ENVIRONMENT
+      config:
+        str_replace:
+          template: { get_file: '../files/install_webserver.sh' }
+          params:
+            INDEX_PHP: { get_file: '../files/index.php' }
+            CONFIG_PHP: { get_file: '../files/config.php' }
+
+  deploy_webserver:
+    type: OS::Heat::SoftwareDeploymentGroup
+    properties:
+      config:
+        get_resource: install_webserver
+      servers:
+        server: { get_resource: server }
+      input_values:
+        DB_HOST: { get_param: db_host }
+        APP_DB: { get_param: db_name }
+        APP_USER: { get_param: db_user }
+        APP_PASSWORD: { get_param: db_password }
+        APP_ENVIRONMENT: 'Production'
+
+  configure_service:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      config: { get_file: '../files/service_discovery.sh' }
+
+  service_discovery:
+    type: OS::Heat::SoftwareDeploymentGroup
+    properties:
+      config:
+        get_resource: configure_service
+      servers:
+        server: { get_resource: server }
+
+  install_consul:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      inputs:
+      - name: agenttype
+      - name: jumpbox_ip
+      - name: vip
+      - name: local_ip
+      config: 
+        str_replace:
+          template:  { get_file: '../files/install_consul.sh' }
+          params:
+            CONSUL_INIT_SH: { get_file: '../files/consul.init.sh' }
+
+  start_consul:
+    type: OS::Heat::SoftwareDeploymentGroup
+    depends_on: [ service_discovery ]
+    properties:
+      config:
+        get_resource: install_consul
+      servers:
+        server: { get_resource: server }
+      input_values:
+        agenttype: client
+        vip: { get_param: haproxy_vip }
+
+  cleanup_script:
+    type: OS::Heat::SoftwareConfig
+    properties:
+      group: script
+      config: { get_file: '../files/autoscale_cleanup.sh' }
+
+  pre_delete_cleanup:
+    type: OS::Heat::SoftwareDeploymentGroup
+    properties:
+      actions: ['DELETE']
+      config:
+        get_resource: cleanup_script
+      servers:
+        server: { get_resource: server }
+
+outputs:
+  server_ip:
+    description: IP Address of the load-balanced server.
+    value: { get_attr: [server, first_address] }

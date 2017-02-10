@@ -1,5 +1,5 @@
 parameters:
-  key_name: RobC
+  key_name: MySSHKey
   image: CentOS 7
   router: InternetGW
   external_network: internet
